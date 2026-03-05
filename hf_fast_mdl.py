@@ -10,6 +10,8 @@ import argparse
 import curses
 import fnmatch
 import sys
+import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -229,6 +231,49 @@ def run_picker(files: list[FileEntry]) -> list[FileEntry]:
     return curses.wrapper(_picker_main, files)
 
 
+def _download_with_spinner(
+    repo_id: str,
+    entry: FileEntry,
+    output_dir: Path,
+    token: str | None,
+    cache_dir: Path | None,
+    force_download: bool,
+    offline: bool,
+) -> None:
+    """Show a live status spinner while `hf_hub_download` is running."""
+    status_prefix = "  Downloading"
+    spinner_frames = "|/-\\"
+    stop_event = threading.Event()
+
+    def spinner() -> None:
+        frame = 0
+        while not stop_event.is_set():
+            msg = f"\r{status_prefix} {spinner_frames[frame % len(spinner_frames)]} {entry.path}"
+            sys.stdout.write(msg)
+            sys.stdout.flush()
+            frame += 1
+            time.sleep(0.1)
+
+    spinner_thread = threading.Thread(target=spinner, daemon=True)
+    spinner_thread.start()
+    try:
+        hf_hub_download(
+            repo_id=repo_id,
+            filename=entry.path,
+            local_dir=str(output_dir),
+            token=token,
+            cache_dir=str(cache_dir) if cache_dir else None,
+            force_download=force_download,
+            local_files_only=offline,
+        )
+    finally:
+        stop_event.set()
+        spinner_thread.join(timeout=0.5)
+        # Clear spinner line before printing the next message.
+        sys.stdout.write("\r" + " " * 120 + "\r")
+        sys.stdout.flush()
+
+
 def download_files(
     repo_id: str,
     files: list[FileEntry],
@@ -248,24 +293,36 @@ def download_files(
 
     for i, entry in enumerate(files, 1):
         size_info = f" ({format_size(entry.size)})" if entry.size > 0 else ""
-        print(f"[{i}/{len(files)}] {entry.path}{size_info}")
+        print(f"[{i}/{len(files)}] {entry.path}{size_info}", flush=True)
 
         dest_file = output_dir / entry.path
         if dest_file.exists() and not force_download:
             skipped += 1
-            print("  SKIP: Already exists locally (use --force-download to re-fetch)")
+            print("  SKIP: Already exists locally (use --force-download to re-fetch)", flush=True)
             continue
 
         try:
-            hf_hub_download(
-                repo_id=repo_id,
-                filename=entry.path,
-                local_dir=str(output_dir),
-                token=token,
-                cache_dir=str(cache_dir) if cache_dir else None,
-                force_download=force_download,
-                local_files_only=offline,
-            )
+            if sys.stdout.isatty():
+                _download_with_spinner(
+                    repo_id=repo_id,
+                    entry=entry,
+                    output_dir=output_dir,
+                    token=token,
+                    cache_dir=cache_dir,
+                    force_download=force_download,
+                    offline=offline,
+                )
+            else:
+                hf_hub_download(
+                    repo_id=repo_id,
+                    filename=entry.path,
+                    local_dir=str(output_dir),
+                    token=token,
+                    cache_dir=str(cache_dir) if cache_dir else None,
+                    force_download=force_download,
+                    local_files_only=offline,
+                )
+            print("  OK", flush=True)
         except EntryNotFoundError:
             errors += 1
             print(f"  WARNING: File not found on server, skipping: {entry.path}", file=sys.stderr)

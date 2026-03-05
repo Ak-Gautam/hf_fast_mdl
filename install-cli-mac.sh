@@ -36,7 +36,10 @@ if command -v pipx >/dev/null 2>&1; then
 fi
 
 echo "pipx not found; falling back to user install via pip..."
-python3 -m pip install --user --upgrade "$REPO_DIR"
+if ! python3 -m pip install --user --upgrade "$REPO_DIR"; then
+  echo "Detected managed system Python (PEP 668). Retrying with --break-system-packages..."
+  python3 -m pip install --user --upgrade --break-system-packages "$REPO_DIR"
+fi
 
 USER_BASE="$(python3 -m site --user-base)"
 BIN_DIR="$USER_BASE/bin"
