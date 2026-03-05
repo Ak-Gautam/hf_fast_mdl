@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hf_fast_mdl"
+version = "0.1.0"
+description = "Fast Hugging Face model downloader with interactive file picker"
+requires-python = ">=3.10"
+dependencies = [
+    "huggingface_hub>=0.25.0",
+]
+
+[project.scripts]
+hf_fast_mdl = "hf_fast_mdl:main"
+hfmdl = "hf_fast_mdl:main"
